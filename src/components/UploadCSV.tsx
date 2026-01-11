@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Upload, Download, X } from "lucide-react";
+import { Upload, Download } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import QRCodeDisplay from "./QRCodeDisplay";
+import Papa from "papaparse";
 
 type AttendeeData = {
   Name: string;
@@ -11,7 +12,6 @@ type AttendeeData = {
   Quantity?: number;
   Email?: string;
   qr_code?: string;
-  id?: string;
 };
 
 export default function UploadCSV() {
@@ -22,23 +22,30 @@ export default function UploadCSV() {
   const [attendees, setAttendees] = useState<AttendeeData[]>([]);
   const { user } = useAuth();
 
+  // Browser-safe UUID
+  const uuid = () =>
+    "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      const v = c === "x" ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+
   const parseCSV = (text: string): AttendeeData[] => {
-    const lines = text.split("\n").filter(l => l.trim());
-    const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+    const result = Papa.parse(text, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: h => h.trim()
+    });
 
-    const get = (row: string[], name: string) =>
-      row[headers.indexOf(name)] || "";
+    if (result.errors.length) throw new Error("Invalid CSV format");
 
-    return lines.slice(1).map(line => {
-      const v = line.split(",").map(x => x.trim());
-      return {
-        Name: get(v, "name"),
-        Gate: get(v, "gate"),
-        Passtype: get(v, "passtype"),
-        Quantity: Number(get(v, "quantity")) || 1,
-        Email: get(v, "email")
-      };
-    }).filter(a => a.Name && a.Gate);
+    return (result.data as any[]).map(row => ({
+      Name: row.Name,
+      Gate: row.Gate,
+      Passtype: row.Passtype || "Regular",
+      Quantity: Number(row.Quantity) || 1,
+      Email: row.Email || ""
+    })).filter(r => r.Name && r.Gate);
   };
 
   const handleUpload = async () => {
@@ -53,12 +60,8 @@ export default function UploadCSV() {
       const parsed = parseCSV(text);
 
       const rows = parsed.map(a => ({
-        Name: a.Name,
-        Gate: a.Gate,
-        Passtype: a.Passtype || "Regular",
-        Quantity: a.Quantity || 1,
-        Email: a.Email || "",
-        qr_code: crypto.randomUUID(),
+        ...a,
+        qr_code: uuid(),
         created_by: user.id
       }));
 
@@ -70,7 +73,7 @@ export default function UploadCSV() {
       if (error) throw error;
 
       setAttendees(data || []);
-      setSuccess(`Uploaded ${data?.length} attendees successfully`);
+      setSuccess(`Uploaded ${data?.length} attendees`);
       setFile(null);
     } catch (e: any) {
       setError(e.message || "Upload failed");
