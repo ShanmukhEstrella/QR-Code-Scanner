@@ -29,16 +29,24 @@ export default function AttendeesList() {
   const loadAttendees = async () => {
     setLoading(true);
     try {
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+
+      // Fetch only this user's uploaded attendees
       const { data: attendeesData, error: attendeesError } = await supabase
         .from("attendees")
         .select("*")
+        .eq("created_by", user?.id)
         .order("created_at", { ascending: false });
 
       if (attendeesError) throw attendeesError;
 
+      // Fetch only scans done by this user
       const { data: scansData, error: scansError } = await supabase
         .from("scans")
-        .select("*");
+        .select("*")
+        .eq("scanned_by", user?.id);
 
       if (scansError) throw scansError;
 
