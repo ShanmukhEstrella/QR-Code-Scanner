@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Download } from "lucide-react";
 import { supabase } from "../lib/supabase";
-import { useAuth } from "../contexts/AuthContext";
 import QRCodeDisplay from "./QRCodeDisplay";
 
 type AttendeeData = {
@@ -19,7 +18,6 @@ export default function UploadCSV() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [attendees, setAttendees] = useState<AttendeeData[]>([]);
-  const { user } = useAuth();
 
   const generateUUID = () =>
     "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
@@ -57,20 +55,27 @@ export default function UploadCSV() {
   };
 
   const handleUpload = async () => {
-    if (!file || !user) return;
+    if (!file) return;
 
     setUploading(true);
     setError("");
     setSuccess("");
 
     try {
+      // Always get the real Supabase user
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+
+      if (!user) throw new Error("Not logged in");
+
       const text = await file.text();
       const parsed = parseCSV(text);
 
       const rows = parsed.map(a => ({
         ...a,
         qr_code: generateUUID(),
-        created_by: user.id
+        created_by: user.id   // <-- THIS is what connects everything
       }));
 
       const { data, error } = await supabase
@@ -81,7 +86,7 @@ export default function UploadCSV() {
       if (error) throw error;
 
       setAttendees(data || []);
-      setSuccess(`Uploaded ${data?.length} records`);
+      setSuccess(`Uploaded ${data?.length} attendees`);
       setFile(null);
     } catch (e: any) {
       setError(e.message || "Upload failed");
