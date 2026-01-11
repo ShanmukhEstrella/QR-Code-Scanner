@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
-import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
-import { Camera, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { useEffect, useRef, useState } from "react";
+import { Html5Qrcode } from "html5-qrcode";
+import { supabase } from "../lib/supabase";
+import { useAuth } from "../contexts/AuthContext";
+import { Camera, CheckCircle, XCircle, AlertCircle } from "lucide-react";
 
 type ScanResult = {
-  status: 'success' | 'already_scanned' | 'not_found' | 'error';
+  status: "success" | "already_scanned" | "not_found" | "error";
   attendee?: {
     name: string;
-    entry_gate: string;
-    seating_position: string;
+    gate: string;
+    pass: string;
   };
   previousScan?: {
     scanned_at: string;
@@ -20,251 +20,177 @@ type ScanResult = {
 export default function QRScanner() {
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
-  const [cameraError, setCameraError] = useState('');
+  const [cameraError, setCameraError] = useState("");
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const { user } = useAuth();
 
+  // -------------------------
+  // HANDLE QR SCAN
+  // -------------------------
   const handleScan = async (qrCode: string) => {
     if (!user) return;
 
     try {
-      const { data: attendee, error: attendeeError } = await supabase
-        .from('attendees')
-        .select('*')
-        .eq('qr_code', qrCode)
-        .maybeSingle();
+      const { data: attendee, error } = await supabase
+        .from("attendees")
+        .select("*")
+        .eq("qr_code", qrCode)
+        .single();
 
-      if (attendeeError || !attendee) {
+      if (error || !attendee) {
         setResult({
-          status: 'not_found',
-          message: 'QR Code not found in system',
+          status: "not_found",
+          message: "QR Code not found in system"
         });
         return;
       }
 
-      const { data: existingScan, error: scanError } = await supabase
-        .from('scans')
-        .select('*')
-        .eq('attendee_id', attendee.id)
+      const { data: existingScan } = await supabase
+        .from("scans")
+        .select("*")
+        .eq("attendee_id", attendee.id)
         .maybeSingle();
-
-      if (scanError) throw scanError;
 
       if (existingScan) {
         setResult({
-          status: 'already_scanned',
+          status: "already_scanned",
           attendee: {
-            name: attendee.name,
-            entry_gate: attendee.entry_gate,
-            seating_position: attendee.seating_position,
+            name: attendee.Name,
+            gate: attendee.Gate,
+            pass: attendee.Passtype || "Regular"
           },
           previousScan: {
-            scanned_at: existingScan.scanned_at,
+            scanned_at: existingScan.scanned_at
           },
-          message: 'Already scanned previously',
+          message: "Already scanned"
         });
         return;
       }
 
-      const { error: insertError } = await supabase
-        .from('scans')
-        .insert({
-          attendee_id: attendee.id,
-          scanned_by: user.id,
-        });
-
-      if (insertError) throw insertError;
-
-      setResult({
-        status: 'success',
-        attendee: {
-          name: attendee.name,
-          entry_gate: attendee.entry_gate,
-          seating_position: attendee.seating_position,
-        },
-        message: 'Successfully scanned',
+      await supabase.from("scans").insert({
+        attendee_id: attendee.id,
+        scanned_by: user.id
       });
-    } catch (error) {
+
       setResult({
-        status: 'error',
-        message: error instanceof Error ? error.message : 'Failed to process scan',
+        status: "success",
+        attendee: {
+          name: attendee.Name,
+          gate: attendee.Gate,
+          pass: attendee.Passtype || "Regular"
+        },
+        message: "Entry Allowed"
+      });
+    } catch (err: any) {
+      setResult({
+        status: "error",
+        message: err.message || "Scan failed"
       });
     }
   };
 
+  // -------------------------
+  // START CAMERA
+  // -------------------------
   const startScanning = async () => {
-    try {
-      setCameraError('');
-      setResult(null);
-      setScanning(true);
+    setCameraError("");
+    setResult(null);
+    setScanning(true);
 
-      // Wait a tick to ensure qr-reader div is rendered
-      setTimeout(async () => {
+    setTimeout(async () => {
+      try {
         if (!scannerRef.current) {
-          const scanner = new Html5Qrcode('qr-reader');
+          const scanner = new Html5Qrcode("qr-reader");
           scannerRef.current = scanner;
 
-          console.log('Starting scanner...');
           await scanner.start(
-            { facingMode: 'environment' },
+            { facingMode: "environment" },
             { fps: 10, qrbox: { width: 250, height: 250 } },
             (decodedText) => {
-              console.log('QR code detected:', decodedText);
               handleScan(decodedText);
               stopScanning();
-            },
-            (errorMessage) => {
-              // Optional: debug scan failures
-              // console.log('Scan error:', errorMessage);
             }
           );
-          console.log('Scanner started');
         }
-      }, 100);
-    } catch (error) {
-      setCameraError(
-        'Failed to access camera. Please ensure camera permissions are granted.'
-      );
-      console.error('Camera error:', error);
-    }
+      } catch {
+        setCameraError("Camera permission denied or not available");
+      }
+    }, 300);
   };
 
+  // -------------------------
+  // STOP CAMERA
+  // -------------------------
   const stopScanning = async () => {
     if (scannerRef.current) {
-      try {
-        await scannerRef.current.stop();
-        scannerRef.current.clear(); // Clear QR canvas
-        scannerRef.current = null;
-        console.log('Scanner stopped');
-      } catch (error) {
-        console.error('Error stopping scanner:', error);
-      }
+      await scannerRef.current.stop();
+      scannerRef.current.clear();
+      scannerRef.current = null;
     }
     setScanning(false);
   };
 
   useEffect(() => {
     return () => {
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(console.error);
-      }
+      if (scannerRef.current) scannerRef.current.stop().catch(() => {});
     };
   }, []);
 
-  const getStatusIcon = () => {
-    switch (result?.status) {
-      case 'success':
-        return <CheckCircle className="w-16 h-16 text-green-500" />;
-      case 'already_scanned':
-        return <AlertCircle className="w-16 h-16 text-yellow-500" />;
-      case 'not_found':
-      case 'error':
-        return <XCircle className="w-16 h-16 text-red-500" />;
-      default:
-        return null;
-    }
-  };
-
-  const getStatusColor = () => {
-    switch (result?.status) {
-      case 'success':
-        return 'bg-green-50 border-green-200';
-      case 'already_scanned':
-        return 'bg-yellow-50 border-yellow-200';
-      case 'not_found':
-      case 'error':
-        return 'bg-red-50 border-red-200';
-      default:
-        return 'bg-gray-50 border-gray-200';
-    }
+  // -------------------------
+  // UI
+  // -------------------------
+  const icon = () => {
+    if (result?.status === "success") return <CheckCircle className="w-14 h-14 text-green-500" />;
+    if (result?.status === "already_scanned") return <AlertCircle className="w-14 h-14 text-yellow-500" />;
+    return <XCircle className="w-14 h-14 text-red-500" />;
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-      <h2 className="text-2xl font-bold text-gray-900 mb-6">QR Code Scanner</h2>
+    <div className="bg-white p-6 rounded-xl shadow border">
+      <h2 className="text-2xl font-bold mb-4">QR Scanner</h2>
 
-      {cameraError && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-          {cameraError}
-        </div>
-      )}
+      {cameraError && <div className="bg-red-100 p-3 mb-4">{cameraError}</div>}
 
       {!scanning && !result && (
-        <div className="text-center py-12">
-          <div className="bg-blue-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Camera className="w-10 h-10 text-blue-600" />
-          </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">Ready to Scan</h3>
-          <p className="text-gray-600 mb-6">
-            Click the button below to start scanning QR codes
-          </p>
-          <button
-            onClick={startScanning}
-            className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-          >
+        <div className="text-center py-10">
+          <Camera className="w-12 h-12 mx-auto mb-4 text-blue-500" />
+          <button onClick={startScanning} className="bg-blue-600 text-white px-6 py-3 rounded-lg">
             Start Scanning
           </button>
         </div>
       )}
 
       {scanning && (
-        <div>
-          <div id="qr-reader" className="rounded-lg overflow-hidden mb-4" />
-          <button
-            onClick={stopScanning}
-            className="w-full bg-red-600 text-white py-3 rounded-lg font-semibold hover:bg-red-700 transition-colors"
-          >
-            Stop Scanning
+        <>
+          <div id="qr-reader" className="mb-4 rounded-lg" />
+          <button onClick={stopScanning} className="bg-red-600 text-white w-full py-2 rounded">
+            Stop
           </button>
-        </div>
+        </>
       )}
 
       {result && (
-        <div className={`border rounded-lg p-6 ${getStatusColor()}`}>
-          <div className="flex flex-col items-center text-center">
-            {getStatusIcon()}
-            <h3 className="text-xl font-bold text-gray-900 mt-4 mb-2">{result.message}</h3>
+        <div className="mt-6 border rounded p-6 text-center">
+          {icon()}
+          <h3 className="text-xl font-bold mt-3">{result.message}</h3>
 
-            {result.attendee && (
-              <div className="mt-4 space-y-2 text-left w-full max-w-md">
-                <div className="bg-white rounded-lg p-4 shadow-sm">
-                  <p className="text-sm text-gray-600">Name</p>
-                  <p className="font-semibold text-gray-900">{result.attendee.name}</p>
-                </div>
-                <div className="bg-white rounded-lg p-4 shadow-sm">
-                  <p className="text-sm text-gray-600">Entry Gate</p>
-                  <p className="font-semibold text-gray-900">
-                    {result.attendee.entry_gate}
-                  </p>
-                </div>
-                <div className="bg-white rounded-lg p-4 shadow-sm">
-                  <p className="text-sm text-gray-600">Seating Position</p>
-                  <p className="font-semibold text-gray-900">
-                    {result.attendee.seating_position}
-                  </p>
-                </div>
-              </div>
-            )}
+          {result.attendee && (
+            <div className="mt-4 text-left">
+              <p><b>Name:</b> {result.attendee.name}</p>
+              <p><b>Gate:</b> {result.attendee.gate}</p>
+              <p><b>Pass:</b> {result.attendee.pass}</p>
+            </div>
+          )}
 
-            {result.previousScan && (
-              <div className="mt-4 bg-white rounded-lg p-4 shadow-sm w-full max-w-md">
-                <p className="text-sm text-gray-600">Previously Scanned At</p>
-                <p className="font-semibold text-gray-900">
-                  {new Date(result.previousScan.scanned_at).toLocaleString()}
-                </p>
-              </div>
-            )}
-
-            <button
-              onClick={() => {
-                setResult(null);
-                startScanning();
-              }}
-              className="mt-6 bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-            >
-              Scan Another QR Code
-            </button>
-          </div>
+          <button
+            onClick={() => {
+              setResult(null);
+              startScanning();
+            }}
+            className="mt-4 bg-blue-600 text-white px-6 py-2 rounded"
+          >
+            Scan Next
+          </button>
         </div>
       )}
     </div>
