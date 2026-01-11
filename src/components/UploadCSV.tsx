@@ -1,16 +1,15 @@
 import { useState } from "react";
-import { Upload, Download } from "lucide-react";
+import { Download } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import QRCodeDisplay from "./QRCodeDisplay";
-import Papa from "papaparse";
 
 type AttendeeData = {
   Name: string;
+  Passtype: string;
+  Quantity: number;
+  Email: string;
   Gate: string;
-  Passtype?: string;
-  Quantity?: number;
-  Email?: string;
   qr_code?: string;
 };
 
@@ -22,8 +21,7 @@ export default function UploadCSV() {
   const [attendees, setAttendees] = useState<AttendeeData[]>([]);
   const { user } = useAuth();
 
-  // Browser-safe UUID
-  const uuid = () =>
+  const generateUUID = () =>
     "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
       const r = Math.random() * 16 | 0;
       const v = c === "x" ? r : (r & 0x3 | 0x8);
@@ -31,21 +29,31 @@ export default function UploadCSV() {
     });
 
   const parseCSV = (text: string): AttendeeData[] => {
-    const result = Papa.parse(text, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: h => h.trim()
-    });
+    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+    const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
 
-    if (result.errors.length) throw new Error("Invalid CSV format");
+    const idx = (name: string) => headers.indexOf(name);
 
-    return (result.data as any[]).map(row => ({
-      Name: row.Name,
-      Gate: row.Gate,
-      Passtype: row.Passtype || "Regular",
-      Quantity: Number(row.Quantity) || 1,
-      Email: row.Email || ""
-    })).filter(r => r.Name && r.Gate);
+    const nameI = idx("name");
+    const passI = idx("passtype");
+    const qtyI = idx("quantity");
+    const emailI = idx("email");
+    const gateI = idx("gate");
+
+    if (nameI === -1 || gateI === -1) {
+      throw new Error("CSV must contain Name and Gate columns");
+    }
+
+    return lines.slice(1).map(line => {
+      const v = line.split(",").map(x => x.trim());
+      return {
+        Name: v[nameI],
+        Passtype: passI !== -1 ? v[passI] : "Regular",
+        Quantity: qtyI !== -1 ? Number(v[qtyI]) || 1 : 1,
+        Email: emailI !== -1 ? v[emailI] : "",
+        Gate: v[gateI]
+      };
+    }).filter(a => a.Name && a.Gate);
   };
 
   const handleUpload = async () => {
@@ -61,7 +69,7 @@ export default function UploadCSV() {
 
       const rows = parsed.map(a => ({
         ...a,
-        qr_code: uuid(),
+        qr_code: generateUUID(),
         created_by: user.id
       }));
 
@@ -73,7 +81,7 @@ export default function UploadCSV() {
       if (error) throw error;
 
       setAttendees(data || []);
-      setSuccess(`Uploaded ${data?.length} attendees`);
+      setSuccess(`Uploaded ${data?.length} records`);
       setFile(null);
     } catch (e: any) {
       setError(e.message || "Upload failed");
@@ -110,7 +118,11 @@ export default function UploadCSV() {
         {error && <div className="bg-red-100 p-3">{error}</div>}
         {success && <div className="bg-green-100 p-3">{success}</div>}
 
-        <input type="file" accept=".csv" onChange={e => setFile(e.target.files?.[0] || null)} />
+        <input
+          type="file"
+          accept=".csv"
+          onChange={e => setFile(e.target.files?.[0] || null)}
+        />
 
         {file && (
           <button
