@@ -96,28 +96,35 @@ export default function QRScanner() {
     try {
       setCameraError('');
       setResult(null);
-
-      const scanner = new Html5Qrcode('qr-reader');
-      scannerRef.current = scanner;
-
-      await scanner.start(
-        { facingMode: 'environment' },
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-        },
-        (decodedText) => {
-          handleScan(decodedText);
-          stopScanning();
-        },
-        () => {
-          // Ignore scan failures
-        }
-      );
-
       setScanning(true);
+
+      // Wait a tick to ensure qr-reader div is rendered
+      setTimeout(async () => {
+        if (!scannerRef.current) {
+          const scanner = new Html5Qrcode('qr-reader');
+          scannerRef.current = scanner;
+
+          console.log('Starting scanner...');
+          await scanner.start(
+            { facingMode: 'environment' },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            (decodedText) => {
+              console.log('QR code detected:', decodedText);
+              handleScan(decodedText);
+              stopScanning();
+            },
+            (errorMessage) => {
+              // Optional: debug scan failures
+              // console.log('Scan error:', errorMessage);
+            }
+          );
+          console.log('Scanner started');
+        }
+      }, 100);
     } catch (error) {
-      setCameraError('Failed to access camera. Please ensure camera permissions are granted.');
+      setCameraError(
+        'Failed to access camera. Please ensure camera permissions are granted.'
+      );
       console.error('Camera error:', error);
     }
   };
@@ -126,7 +133,9 @@ export default function QRScanner() {
     if (scannerRef.current) {
       try {
         await scannerRef.current.stop();
+        scannerRef.current.clear(); // Clear QR canvas
         scannerRef.current = null;
+        console.log('Scanner stopped');
       } catch (error) {
         console.error('Error stopping scanner:', error);
       }
@@ -186,7 +195,9 @@ export default function QRScanner() {
             <Camera className="w-10 h-10 text-blue-600" />
           </div>
           <h3 className="text-xl font-semibold text-gray-900 mb-2">Ready to Scan</h3>
-          <p className="text-gray-600 mb-6">Click the button below to start scanning QR codes</p>
+          <p className="text-gray-600 mb-6">
+            Click the button below to start scanning QR codes
+          </p>
           <button
             onClick={startScanning}
             className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition-colors"
@@ -212,9 +223,7 @@ export default function QRScanner() {
         <div className={`border rounded-lg p-6 ${getStatusColor()}`}>
           <div className="flex flex-col items-center text-center">
             {getStatusIcon()}
-            <h3 className="text-xl font-bold text-gray-900 mt-4 mb-2">
-              {result.message}
-            </h3>
+            <h3 className="text-xl font-bold text-gray-900 mt-4 mb-2">{result.message}</h3>
 
             {result.attendee && (
               <div className="mt-4 space-y-2 text-left w-full max-w-md">
@@ -224,11 +233,15 @@ export default function QRScanner() {
                 </div>
                 <div className="bg-white rounded-lg p-4 shadow-sm">
                   <p className="text-sm text-gray-600">Entry Gate</p>
-                  <p className="font-semibold text-gray-900">{result.attendee.entry_gate}</p>
+                  <p className="font-semibold text-gray-900">
+                    {result.attendee.entry_gate}
+                  </p>
                 </div>
                 <div className="bg-white rounded-lg p-4 shadow-sm">
                   <p className="text-sm text-gray-600">Seating Position</p>
-                  <p className="font-semibold text-gray-900">{result.attendee.seating_position}</p>
+                  <p className="font-semibold text-gray-900">
+                    {result.attendee.seating_position}
+                  </p>
                 </div>
               </div>
             )}
