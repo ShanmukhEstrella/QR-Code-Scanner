@@ -10,6 +10,7 @@ type AttendeeData = {
   Passtype: string;
   ticket_label: string;
   qr_code: string;
+  email_batch: number;
 };
 
 export default function UploadCSV() {
@@ -18,9 +19,6 @@ export default function UploadCSV() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [attendees, setAttendees] = useState<AttendeeData[]>([]);
-
-  const generateUUID = () =>
-    crypto.randomUUID();
 
   const parseCSV = (text: string) => {
     const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
@@ -41,7 +39,6 @@ export default function UploadCSV() {
 
   const handleUpload = async () => {
     if (!file) return;
-
     setUploading(true);
     setError("");
     setSuccess("");
@@ -53,18 +50,27 @@ export default function UploadCSV() {
       const text = await file.text();
       const parsed = parseCSV(text);
 
-      const rows = parsed.flatMap(a =>
-        Array.from({ length: a.Quantity }).map((_, i) => ({
-          Name: a.Name,
-          Email: a.Email,
-          Gate: a.Gate,
-          Passtype: a.Passtype,
-          Quantity: 1,
-          ticket_label: `${a.Email}-${i + 1}`,
-          qr_code: generateUUID(),
-          created_by: user.id
-        }))
-      );
+      const emailCounter: Record<string, number> = {};
+      const rows: any[] = [];
+
+      parsed.forEach(row => {
+        emailCounter[row.Email] = (emailCounter[row.Email] || 0) + 1;
+        const batch = emailCounter[row.Email];   // ← this creates folder numbers
+
+        for (let i = 1; i <= row.Quantity; i++) {
+          rows.push({
+            Name: row.Name,
+            Email: row.Email,
+            Gate: row.Gate,
+            Passtype: row.Passtype,
+            Quantity: 1,
+            ticket_label: `${row.Email}-${i}`,
+            email_batch: batch,
+            qr_code: crypto.randomUUID(),
+            created_by: user.id
+          });
+        }
+      });
 
       const { data, error } = await supabase.from("attendees").insert(rows).select();
       if (error) throw error;
@@ -83,7 +89,8 @@ export default function UploadCSV() {
     const csv =
       "Name,Email,Passtype,Quantity,Gate\n" +
       "John Doe,john@gmail.com,VIP,3,Gate A\n" +
-      "Jane Smith,jane@gmail.com,Regular,2,Gate B";
+      "John Doe,john@gmail.com,Regular,2,Gate B\n" +
+      "Jane Smith,jane@gmail.com,VIP,2,Gate C";
 
     const blob = new Blob([csv], { type: "text/csv" });
     const a = document.createElement("a");
