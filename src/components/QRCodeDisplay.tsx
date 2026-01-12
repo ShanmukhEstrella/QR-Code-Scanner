@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { Download } from "lucide-react";
+import { Download, ChevronDown, ChevronUp } from "lucide-react";
 
 type Attendee = {
   id: string;
-  Name: string;
-  Email: string;
-  Gate: string;
-  Passtype: string;
-  ticket_label: string;
-  email_batch: number;
+  name: string;
+  entry_gate: string;
+  seating_position: string;
+  ticket_label: string;   // <-- REAL QR value
 };
 
 type Props = {
@@ -23,13 +21,14 @@ function QRCodeCard({ attendee }: { attendee: Attendee }) {
     if (canvasRef.current) {
       QRCode.toCanvas(canvasRef.current, attendee.ticket_label, {
         width: 200,
-        margin: 2
+        margin: 2,
       });
     }
   }, [attendee.ticket_label]);
 
   const downloadQR = () => {
     if (!canvasRef.current) return;
+
     const url = canvasRef.current.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = url;
@@ -38,91 +37,79 @@ function QRCodeCard({ attendee }: { attendee: Attendee }) {
   };
 
   return (
-    <div className="bg-white border rounded p-4">
+    <div className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
       <canvas ref={canvasRef} className="mx-auto mb-3" />
-      <p className="text-center">{attendee.ticket_label}</p>
-      <button onClick={downloadQR} className="w-full bg-blue-600 text-white py-2 mt-2 rounded">
-        <Download size={16}/> Download
+      <div className="text-center space-y-1">
+        <h3 className="font-semibold text-gray-900">{attendee.ticket_label}</h3>
+        <p className="text-sm text-gray-600">Gate: {attendee.entry_gate}</p>
+        <p className="text-sm text-gray-600">Seat: {attendee.seating_position}</p>
+      </div>
+      <button
+        onClick={downloadQR}
+        className="mt-3 w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm"
+      >
+        <Download className="w-4 h-4" />
+        Download QR
       </button>
     </div>
   );
 }
 
 export default function QRCodeDisplay({ attendees }: Props) {
+  const [expanded, setExpanded] = useState(true);
+
   const downloadAllQR = async () => {
-    const files: { path: string; data: Uint8Array }[] = [];
-
-    for (const a of attendees) {
+    for (const attendee of attendees) {
       const canvas = document.createElement("canvas");
-      await QRCode.toCanvas(canvas, a.ticket_label, { width: 400 });
 
-      const blob = await (await fetch(canvas.toDataURL())).blob();
-      const buf = new Uint8Array(await blob.arrayBuffer());
-
-      const folder = `${a.Email}-${a.email_batch}`;
-      files.push({
-        path: `${folder}/${a.ticket_label}.png`,
-        data: buf
+      await QRCode.toCanvas(canvas, attendee.ticket_label, {
+        width: 400,
+        margin: 2,
       });
+
+      const url = canvas.toDataURL("image/png");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${attendee.ticket_label}.png`;
+      a.click();
+
+      await new Promise(resolve => setTimeout(resolve, 120));
     }
-
-    // --- ZIP builder ---
-    const zipParts: Uint8Array[] = [];
-    const centralDir: Uint8Array[] = [];
-    let offset = 0;
-
-    const encoder = new TextEncoder();
-    const u16 = (v:number)=>new Uint8Array([v&255,(v>>8)&255]);
-    const u32 = (v:number)=>new Uint8Array([v&255,(v>>8)&255,(v>>16)&255,(v>>24)&255]);
-
-    for (const f of files) {
-      const name = encoder.encode(f.path);
-
-      const header = new Uint8Array([
-        0x50,0x4b,0x03,0x04,20,0,0,0,0,0,
-        ...u16(0),...u16(0),
-        ...u32(0),...u32(f.data.length),...u32(f.data.length),
-        ...u16(name.length),0,0
-      ]);
-
-      zipParts.push(header,name,f.data);
-
-      const central = new Uint8Array([
-        0x50,0x4b,0x01,0x02,20,0,20,0,0,0,0,0,
-        ...u16(0),...u16(0),
-        ...u32(0),...u32(f.data.length),...u32(f.data.length),
-        ...u16(name.length),0,0,0,0,0,0,
-        ...u32(offset)
-      ]);
-
-      centralDir.push(central,name);
-      offset += header.length + name.length + f.data.length;
-    }
-
-    const centralSize = centralDir.reduce((s,b)=>s+b.length,0);
-
-    const end = new Uint8Array([
-      0x50,0x4b,0x05,0x06,0,0,
-      ...u16(files.length),...u16(files.length),
-      ...u32(centralSize),...u32(offset),0,0
-    ]);
-
-    const zip = new Blob([...zipParts,...centralDir,end],{type:"application/zip"});
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(zip);
-    link.download = "QR_Tickets.zip";
-    link.click();
   };
 
   return (
-    <div className="p-6 border rounded">
-      <button onClick={downloadAllQR} className="bg-blue-600 text-white px-4 py-2 rounded">
-        Download All (ZIP)
-      </button>
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <h2 className="text-2xl font-bold text-gray-900">
+            Generated QR Codes ({attendees.length})
+          </h2>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-gray-500 hover:text-gray-700"
+          >
+            {expanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+          </button>
+        </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-        {attendees.map(a => <QRCodeCard key={a.id} attendee={a} />)}
+        {attendees.length > 0 && (
+          <button
+            onClick={downloadAllQR}
+            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm"
+          >
+            <Download className="w-4 h-4" />
+            Download All
+          </button>
+        )}
       </div>
+
+      {expanded && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {attendees.map(attendee => (
+            <QRCodeCard key={attendee.id} attendee={attendee} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
