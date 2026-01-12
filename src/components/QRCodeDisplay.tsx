@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Download, ChevronDown, ChevronUp } from "lucide-react";
-import JSZip from "jszip";
-import { saveAs } from "file-saver";
 
 type Attendee = {
   id: string;
@@ -10,7 +8,7 @@ type Attendee = {
   Email: string;
   Gate: string;
   Passtype: string;
-  ticket_label: string; // email-1, email-2
+  ticket_label: string;
 };
 
 type Props = {
@@ -39,20 +37,11 @@ function QRCodeCard({ attendee }: { attendee: Attendee }) {
   };
 
   return (
-    <div className="bg-white border rounded-lg p-4 hover:shadow transition">
+    <div className="bg-white border rounded p-4">
       <canvas ref={canvasRef} className="mx-auto mb-3" />
-
-      <div className="text-center text-sm space-y-1">
-        <p className="font-semibold">{attendee.Name}</p>
-        <p>{attendee.ticket_label}</p>
-        <p>Gate: {attendee.Gate}</p>
-      </div>
-
-      <button
-        onClick={downloadQR}
-        className="mt-3 w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
-      >
-        <Download size={16} /> Download QR
+      <p className="text-center">{attendee.ticket_label}</p>
+      <button onClick={downloadQR} className="w-full bg-blue-600 text-white py-2 mt-2 rounded">
+        <Download size={16}/> Download
       </button>
     </div>
   );
@@ -62,48 +51,81 @@ export default function QRCodeDisplay({ attendees }: Props) {
   const [expanded, setExpanded] = useState(true);
 
   const downloadAllQR = async () => {
-    const zip = new JSZip();
+    const files: { name: string; data: Uint8Array }[] = [];
 
     for (const a of attendees) {
       const canvas = document.createElement("canvas");
-      await QRCode.toCanvas(canvas, a.ticket_label, { width: 400, margin: 2 });
+      await QRCode.toCanvas(canvas, a.ticket_label, { width: 400 });
+      const blob = await (await fetch(canvas.toDataURL())).blob();
+      const buf = new Uint8Array(await blob.arrayBuffer());
 
-      const base64 = canvas.toDataURL("image/png").split(",")[1];
-
-      // create folder for email
-      const folder = zip.folder(a.Email);
-      folder?.file(`${a.ticket_label}.png`, base64, { base64: true });
+      files.push({
+        name: `${a.Email}/${a.ticket_label}.png`,
+        data: buf
+      });
     }
 
-    const blob = await zip.generateAsync({ type: "blob" });
-    saveAs(blob, "QR_Tickets.zip");
+    // Build ZIP manually (no libs)
+    const zipParts: Uint8Array[] = [];
+    let offset = 0;
+    const centralDir: Uint8Array[] = [];
+
+    const textEncoder = new TextEncoder();
+
+    const pushUint32 = (v: number) => new Uint8Array([v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >> 24) & 255]);
+    const pushUint16 = (v: number) => new Uint8Array([v & 255, (v >> 8) & 255]);
+
+    for (const f of files) {
+      const nameBytes = textEncoder.encode(f.name);
+
+      const header = new Uint8Array([
+        0x50,0x4b,0x03,0x04, 20,0, 0,0, 0,0,
+        ...pushUint16(0), ...pushUint16(0),
+        ...pushUint32(0), ...pushUint32(f.data.length), ...pushUint32(f.data.length),
+        ...pushUint16(nameBytes.length),0,0
+      ]);
+
+      zipParts.push(header, nameBytes, f.data);
+
+      const central = new Uint8Array([
+        0x50,0x4b,0x01,0x02, 20,0,20,0,0,0,0,0,
+        ...pushUint16(0),...pushUint16(0),
+        ...pushUint32(0),...pushUint32(f.data.length),...pushUint32(f.data.length),
+        ...pushUint16(nameBytes.length),0,0,0,0,0,0,
+        ...pushUint32(offset)
+      ]);
+
+      centralDir.push(central, nameBytes);
+      offset += header.length + nameBytes.length + f.data.length;
+    }
+
+    const centralSize = centralDir.reduce((s,b)=>s+b.length,0);
+
+    const end = new Uint8Array([
+      0x50,0x4b,0x05,0x06,0,0,
+      ...pushUint16(files.length),
+      ...pushUint16(files.length),
+      ...pushUint32(centralSize),
+      ...pushUint32(offset),0,0
+    ]);
+
+    const zip = new Blob([...zipParts, ...centralDir, end], { type: "application/zip" });
+
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(zip);
+    a.download = "QR_Tickets.zip";
+    a.click();
   };
 
   return (
-    <div className="bg-white rounded-xl shadow border p-6">
-      <div className="flex justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <h2 className="text-xl font-bold">
-            Generated QR Codes ({attendees.length})
-          </h2>
-          <button onClick={() => setExpanded(!expanded)}>
-            {expanded ? <ChevronUp /> : <ChevronDown />}
-          </button>
-        </div>
-
-        <button
-          onClick={downloadAllQR}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded"
-        >
-          <Download size={16} /> Download All
-        </button>
-      </div>
+    <div className="p-6 border rounded">
+      <button onClick={downloadAllQR} className="bg-blue-600 text-white px-4 py-2 rounded">
+        Download All (ZIP)
+      </button>
 
       {expanded && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {attendees.map(a => (
-            <QRCodeCard key={a.id} attendee={a} />
-          ))}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+          {attendees.map(a => <QRCodeCard key={a.id} attendee={a} />)}
         </div>
       )}
     </div>
