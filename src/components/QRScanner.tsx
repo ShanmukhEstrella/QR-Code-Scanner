@@ -27,14 +27,15 @@ export default function QRScanner() {
   // -------------------------
   // HANDLE QR SCAN
   // -------------------------
-  const handleScan = async (qrCode: string) => {
+  const handleScan = async (qrValue: string) => {
     if (!user) return;
 
     try {
+      // 🔥 CRITICAL FIX: Use ticket_label, NOT qr_code
       const { data: attendee, error } = await supabase
         .from("attendees")
         .select("*")
-        .eq("qr_code", qrCode)
+        .eq("ticket_label", qrValue)
         .single();
 
       if (error || !attendee) {
@@ -45,6 +46,7 @@ export default function QRScanner() {
         return;
       }
 
+      // Check if already scanned
       const { data: existingScan } = await supabase
         .from("scans")
         .select("*")
@@ -67,6 +69,7 @@ export default function QRScanner() {
         return;
       }
 
+      // Insert scan
       await supabase.from("scans").insert({
         attendee_id: attendee.id,
         scanned_by: user.id
@@ -107,7 +110,7 @@ export default function QRScanner() {
             { facingMode: "environment" },
             { fps: 10, qrbox: { width: 250, height: 250 } },
             (decodedText) => {
-              handleScan(decodedText);
+              handleScan(decodedText.trim()); // trim avoids invisible mismatch
               stopScanning();
             }
           );
@@ -137,7 +140,7 @@ export default function QRScanner() {
   }, []);
 
   // -------------------------
-  // UI
+  // UI ICON
   // -------------------------
   const icon = () => {
     if (result?.status === "success") return <CheckCircle className="w-14 h-14 text-green-500" />;
@@ -145,6 +148,9 @@ export default function QRScanner() {
     return <XCircle className="w-14 h-14 text-red-500" />;
   };
 
+  // -------------------------
+  // UI
+  // -------------------------
   return (
     <div className="bg-white p-6 rounded-xl shadow border">
       <h2 className="text-2xl font-bold mb-4">QR Scanner</h2>
