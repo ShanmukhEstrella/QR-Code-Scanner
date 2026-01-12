@@ -10,7 +10,7 @@ type AttendeeWithScan = {
   Passtype: string;
   Quantity: number;
   Email: string;
-  qr_code: string;
+  ticket_label: string;   // ✅ THIS is the QR value
   created_at: string;
   scan?: {
     scanned_at: string;
@@ -29,36 +29,35 @@ export default function AttendeesList() {
   const loadAttendees = async () => {
     setLoading(true);
     try {
-      const {
-        data: { user }
-      } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-      // Fetch only this user's uploaded attendees
+      // Get attendees created by this user
       const { data: attendeesData, error: attendeesError } = await supabase
         .from("attendees")
         .select("*")
-        .eq("created_by", user?.id)
+        .eq("created_by", user.id)
         .order("created_at", { ascending: false });
 
       if (attendeesError) throw attendeesError;
 
-      // Fetch only scans done by this user
+      // Get scans
       const { data: scansData, error: scansError } = await supabase
         .from("scans")
         .select("*")
-        .eq("scanned_by", user?.id);
+        .eq("scanned_by", user.id);
 
       if (scansError) throw scansError;
 
-      const attendeesWithScans = (attendeesData || []).map((a) => {
-        const scan = scansData?.find((s) => s.attendee_id === a.id);
+      const withScans = (attendeesData || []).map(a => {
+        const scan = scansData?.find(s => s.attendee_id === a.id);
         return {
           ...a,
           scan: scan ? { scanned_at: scan.scanned_at } : undefined
         };
       });
 
-      setAttendees(attendeesWithScans);
+      setAttendees(withScans);
     } catch (err) {
       console.error("Failed to load attendees:", err);
     } finally {
@@ -66,24 +65,29 @@ export default function AttendeesList() {
     }
   };
 
+  // ---------------------------
+  // DOWNLOAD QR
+  // ---------------------------
   const downloadQR = async (attendee: AttendeeWithScan) => {
     const canvas = document.createElement("canvas");
-    await QRCode.toCanvas(canvas, attendee.qr_code, { width: 400 });
-    const url = canvas.toDataURL("image/png");
 
+    // Encode the SAME value scanner uses
+    await QRCode.toCanvas(canvas, attendee.ticket_label, { width: 400 });
+
+    const url = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = url;
-    a.download = `qr-${attendee.Name.replace(/\s+/g, "-")}.png`;
+    a.download = `${attendee.ticket_label}.png`;   // email-1, email-2 etc
     a.click();
   };
 
-  const filteredAttendees = attendees.filter((a) =>
+  const filteredAttendees = attendees.filter(a =>
     a.Name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     a.Gate.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (a.Passtype || "").toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const scannedCount = attendees.filter((a) => a.scan).length;
+  const scannedCount = attendees.filter(a => a.scan).length;
 
   return (
     <div className="bg-white rounded-xl shadow border p-6">
@@ -102,7 +106,7 @@ export default function AttendeesList() {
           className="w-full pl-9 py-2 border rounded"
           placeholder="Search by name, gate, pass..."
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={e => setSearchTerm(e.target.value)}
         />
       </div>
 
@@ -126,7 +130,7 @@ export default function AttendeesList() {
             </tr>
           </thead>
           <tbody>
-            {filteredAttendees.map((a) => (
+            {filteredAttendees.map(a => (
               <tr key={a.id} className="border-t">
                 <td className="text-center">
                   {a.scan ? (
