@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabase";
 import QRCodeDisplay from "./QRCodeDisplay";
 
 type AttendeeData = {
+  id: string;
   Name: string;
   Email: string;
   Gate: string;
@@ -50,22 +51,33 @@ export default function UploadCSV() {
       const text = await file.text();
       const parsed = parseCSV(text);
 
-      const emailCounter: Record<string, number> = {};
+      // Counters
+      const emailBatch: Record<string, number> = {};
+      const emailTicketCounter: Record<string, number> = {};
+
       const rows: any[] = [];
 
       parsed.forEach(row => {
-        emailCounter[row.Email] = (emailCounter[row.Email] || 0) + 1;
-        const batch = emailCounter[row.Email];   // ← this creates folder numbers
+        // Folder number
+        emailBatch[row.Email] = (emailBatch[row.Email] || 0) + 1;
+        const batch = emailBatch[row.Email];
 
-        for (let i = 1; i <= row.Quantity; i++) {
+        // Ticket numbering (global per email)
+        if (!emailTicketCounter[row.Email]) {
+          emailTicketCounter[row.Email] = 0;
+        }
+
+        for (let i = 0; i < row.Quantity; i++) {
+          emailTicketCounter[row.Email]++;
+
           rows.push({
             Name: row.Name,
             Email: row.Email,
             Gate: row.Gate,
             Passtype: row.Passtype,
             Quantity: 1,
-            ticket_label: `${row.Email}-${i}`,
-            email_batch: batch,
+            ticket_label: `${row.Email}-${emailTicketCounter[row.Email]}`, // ✅ UNIQUE
+            email_batch: batch,                                           // ✅ Folder number
             qr_code: crypto.randomUUID(),
             created_by: user.id
           });
@@ -78,6 +90,7 @@ export default function UploadCSV() {
       setAttendees(data || []);
       setSuccess(`Generated ${data?.length} QR tickets`);
       setFile(null);
+
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -112,7 +125,11 @@ export default function UploadCSV() {
         {error && <div className="bg-red-100 p-3">{error}</div>}
         {success && <div className="bg-green-100 p-3">{success}</div>}
 
-        <input type="file" accept=".csv" onChange={e => setFile(e.target.files?.[0] || null)} />
+        <input
+          type="file"
+          accept=".csv"
+          onChange={e => setFile(e.target.files?.[0] || null)}
+        />
 
         {file && (
           <button
