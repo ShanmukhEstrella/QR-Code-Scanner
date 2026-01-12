@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Download, ChevronDown, ChevronUp } from "lucide-react";
+import JSZip from "jszip";
+import { saveAs } from "file-saver";
 
 type Attendee = {
   id: string;
@@ -20,7 +22,6 @@ function QRCodeCard({ attendee }: { attendee: Attendee }) {
 
   useEffect(() => {
     if (canvasRef.current) {
-      // QR encodes ticket_label (email-1)
       QRCode.toCanvas(canvasRef.current, attendee.ticket_label, {
         width: 200,
         margin: 2
@@ -61,18 +62,21 @@ export default function QRCodeDisplay({ attendees }: Props) {
   const [expanded, setExpanded] = useState(true);
 
   const downloadAllQR = async () => {
+    const zip = new JSZip();
+
     for (const a of attendees) {
       const canvas = document.createElement("canvas");
       await QRCode.toCanvas(canvas, a.ticket_label, { width: 400, margin: 2 });
 
-      const url = canvas.toDataURL("image/png");
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${a.ticket_label}.png`;
-      link.click();
+      const base64 = canvas.toDataURL("image/png").split(",")[1];
 
-      await new Promise(r => setTimeout(r, 150));
+      // create folder for email
+      const folder = zip.folder(a.Email);
+      folder?.file(`${a.ticket_label}.png`, base64, { base64: true });
     }
+
+    const blob = await zip.generateAsync({ type: "blob" });
+    saveAs(blob, "QR_Tickets.zip");
   };
 
   return (
