@@ -3,15 +3,21 @@ import { Download } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import QRCodeDisplay from "./QRCodeDisplay";
 
-type AttendeeData = {
+type ParsedRow = {
+  Name: string;
+  Email: string;
+  Gate: string;
+  Passtype: string;
+  Quantity: number;
+};
+
+type Attendee = {
   id: string;
   Name: string;
   Email: string;
   Gate: string;
   Passtype: string;
   ticket_label: string;
-  qr_code: string;
-  email_batch: number;
 };
 
 export default function UploadCSV() {
@@ -19,9 +25,9 @@ export default function UploadCSV() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [attendees, setAttendees] = useState<AttendeeData[]>([]);
+  const [attendees, setAttendees] = useState<Attendee[]>([]);
 
-  const parseCSV = (text: string) => {
+  const parseCSV = (text: string): ParsedRow[] => {
     const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
     const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
     const idx = (n: string) => headers.indexOf(n);
@@ -51,23 +57,15 @@ export default function UploadCSV() {
       const text = await file.text();
       const parsed = parseCSV(text);
 
-      // Counters
-      const emailBatch: Record<string, number> = {};
       const emailTicketCounter: Record<string, number> = {};
-
       const rows: any[] = [];
 
       parsed.forEach(row => {
-        // Folder number
-        emailBatch[row.Email] = (emailBatch[row.Email] || 0) + 1;
-        const batch = emailBatch[row.Email];
-
-        // Ticket numbering (global per email)
         if (!emailTicketCounter[row.Email]) {
           emailTicketCounter[row.Email] = 0;
         }
 
-        for (let i = 0; i < row.Quantity; i++) {
+        for (let i = 1; i <= row.Quantity; i++) {
           emailTicketCounter[row.Email]++;
 
           rows.push({
@@ -76,9 +74,7 @@ export default function UploadCSV() {
             Gate: row.Gate,
             Passtype: row.Passtype,
             Quantity: 1,
-            ticket_label: `${row.Email}-${emailTicketCounter[row.Email]}`, // ✅ UNIQUE
-            email_batch: batch,                                           // ✅ Folder number
-            qr_code: crypto.randomUUID(),
+            ticket_label: `${row.Email}-${emailTicketCounter[row.Email]}`,
             created_by: user.id
           });
         }
@@ -90,7 +86,6 @@ export default function UploadCSV() {
       setAttendees(data || []);
       setSuccess(`Generated ${data?.length} QR tickets`);
       setFile(null);
-
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -125,11 +120,7 @@ export default function UploadCSV() {
         {error && <div className="bg-red-100 p-3">{error}</div>}
         {success && <div className="bg-green-100 p-3">{success}</div>}
 
-        <input
-          type="file"
-          accept=".csv"
-          onChange={e => setFile(e.target.files?.[0] || null)}
-        />
+        <input type="file" accept=".csv" onChange={e => setFile(e.target.files?.[0] || null)} />
 
         {file && (
           <button
