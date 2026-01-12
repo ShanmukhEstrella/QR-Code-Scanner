@@ -5,11 +5,11 @@ import QRCodeDisplay from "./QRCodeDisplay";
 
 type AttendeeData = {
   Name: string;
-  Passtype: string;
-  Quantity: number;
   Email: string;
   Gate: string;
-  qr_code?: string;
+  Passtype: string;
+  ticket_label: string;
+  qr_code: string;
 };
 
 export default function UploadCSV() {
@@ -20,38 +20,23 @@ export default function UploadCSV() {
   const [attendees, setAttendees] = useState<AttendeeData[]>([]);
 
   const generateUUID = () =>
-    "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
-      const r = Math.random() * 16 | 0;
-      const v = c === "x" ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    });
+    crypto.randomUUID();
 
-  const parseCSV = (text: string): AttendeeData[] => {
+  const parseCSV = (text: string) => {
     const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
     const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+    const idx = (n: string) => headers.indexOf(n);
 
-    const idx = (name: string) => headers.indexOf(name);
-
-    const nameI = idx("name");
-    const passI = idx("passtype");
-    const qtyI = idx("quantity");
-    const emailI = idx("email");
-    const gateI = idx("gate");
-
-    if (nameI === -1 || gateI === -1) {
-      throw new Error("CSV must contain Name and Gate columns");
-    }
-
-    return lines.slice(1).map(line => {
-      const v = line.split(",").map(x => x.trim());
+    return lines.slice(1).map(l => {
+      const v = l.split(",").map(x => x.trim());
       return {
-        Name: v[nameI],
-        Passtype: passI !== -1 ? v[passI] : "Regular",
-        Quantity: qtyI !== -1 ? Number(v[qtyI]) || 1 : 1,
-        Email: emailI !== -1 ? v[emailI] : "",
-        Gate: v[gateI]
+        Name: v[idx("name")],
+        Email: v[idx("email")],
+        Gate: v[idx("gate")],
+        Passtype: v[idx("passtype")] || "Regular",
+        Quantity: Number(v[idx("quantity")]) || 1
       };
-    }).filter(a => a.Name && a.Gate);
+    });
   };
 
   const handleUpload = async () => {
@@ -62,34 +47,33 @@ export default function UploadCSV() {
     setSuccess("");
 
     try {
-      // Always get the real Supabase user
-      const {
-        data: { user }
-      } = await supabase.auth.getUser();
-
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not logged in");
 
       const text = await file.text();
       const parsed = parseCSV(text);
 
-      const rows = parsed.map(a => ({
-        ...a,
-        qr_code: generateUUID(),
-        created_by: user.id   // <-- THIS is what connects everything
-      }));
+      const rows = parsed.flatMap(a =>
+        Array.from({ length: a.Quantity }).map((_, i) => ({
+          Name: a.Name,
+          Email: a.Email,
+          Gate: a.Gate,
+          Passtype: a.Passtype,
+          Quantity: 1,
+          ticket_label: `${a.Email}-${i + 1}`,
+          qr_code: generateUUID(),
+          created_by: user.id
+        }))
+      );
 
-      const { data, error } = await supabase
-        .from("attendees")
-        .insert(rows)
-        .select();
-
+      const { data, error } = await supabase.from("attendees").insert(rows).select();
       if (error) throw error;
 
       setAttendees(data || []);
-      setSuccess(`Uploaded ${data?.length} attendees`);
+      setSuccess(`Generated ${data?.length} QR tickets`);
       setFile(null);
     } catch (e: any) {
-      setError(e.message || "Upload failed");
+      setError(e.message);
     } finally {
       setUploading(false);
     }
@@ -97,17 +81,15 @@ export default function UploadCSV() {
 
   const downloadSampleCSV = () => {
     const csv =
-      "Name,Passtype,Quantity,Email,Gate\n" +
-      "John Doe,VIP,1,john@gmail.com,Gate A\n" +
-      "Jane Smith,Regular,2,jane@gmail.com,Gate B";
+      "Name,Email,Passtype,Quantity,Gate\n" +
+      "John Doe,john@gmail.com,VIP,3,Gate A\n" +
+      "Jane Smith,jane@gmail.com,Regular,2,Gate B";
 
     const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
+    a.href = URL.createObjectURL(blob);
     a.download = "sample.csv";
     a.click();
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -123,11 +105,7 @@ export default function UploadCSV() {
         {error && <div className="bg-red-100 p-3">{error}</div>}
         {success && <div className="bg-green-100 p-3">{success}</div>}
 
-        <input
-          type="file"
-          accept=".csv"
-          onChange={e => setFile(e.target.files?.[0] || null)}
-        />
+        <input type="file" accept=".csv" onChange={e => setFile(e.target.files?.[0] || null)} />
 
         {file && (
           <button
