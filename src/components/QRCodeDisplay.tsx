@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { Download, ChevronDown, ChevronUp } from "lucide-react";
+import { Download } from "lucide-react";
 
 type Attendee = {
   id: string;
@@ -9,6 +9,7 @@ type Attendee = {
   Gate: string;
   Passtype: string;
   ticket_label: string;
+  email_batch: number;
 };
 
 type Props = {
@@ -48,73 +49,69 @@ function QRCodeCard({ attendee }: { attendee: Attendee }) {
 }
 
 export default function QRCodeDisplay({ attendees }: Props) {
-  const [expanded, setExpanded] = useState(true);
-
   const downloadAllQR = async () => {
-    const files: { name: string; data: Uint8Array }[] = [];
+    const files: { path: string; data: Uint8Array }[] = [];
 
     for (const a of attendees) {
       const canvas = document.createElement("canvas");
       await QRCode.toCanvas(canvas, a.ticket_label, { width: 400 });
+
       const blob = await (await fetch(canvas.toDataURL())).blob();
       const buf = new Uint8Array(await blob.arrayBuffer());
 
+      const folder = `${a.Email}-${a.email_batch}`;
       files.push({
-        name: `${a.Email}/${a.ticket_label}.png`,
+        path: `${folder}/${a.ticket_label}.png`,
         data: buf
       });
     }
 
-    // Build ZIP manually (no libs)
+    // --- ZIP builder ---
     const zipParts: Uint8Array[] = [];
-    let offset = 0;
     const centralDir: Uint8Array[] = [];
+    let offset = 0;
 
-    const textEncoder = new TextEncoder();
-
-    const pushUint32 = (v: number) => new Uint8Array([v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >> 24) & 255]);
-    const pushUint16 = (v: number) => new Uint8Array([v & 255, (v >> 8) & 255]);
+    const encoder = new TextEncoder();
+    const u16 = (v:number)=>new Uint8Array([v&255,(v>>8)&255]);
+    const u32 = (v:number)=>new Uint8Array([v&255,(v>>8)&255,(v>>16)&255,(v>>24)&255]);
 
     for (const f of files) {
-      const nameBytes = textEncoder.encode(f.name);
+      const name = encoder.encode(f.path);
 
       const header = new Uint8Array([
-        0x50,0x4b,0x03,0x04, 20,0, 0,0, 0,0,
-        ...pushUint16(0), ...pushUint16(0),
-        ...pushUint32(0), ...pushUint32(f.data.length), ...pushUint32(f.data.length),
-        ...pushUint16(nameBytes.length),0,0
+        0x50,0x4b,0x03,0x04,20,0,0,0,0,0,
+        ...u16(0),...u16(0),
+        ...u32(0),...u32(f.data.length),...u32(f.data.length),
+        ...u16(name.length),0,0
       ]);
 
-      zipParts.push(header, nameBytes, f.data);
+      zipParts.push(header,name,f.data);
 
       const central = new Uint8Array([
-        0x50,0x4b,0x01,0x02, 20,0,20,0,0,0,0,0,
-        ...pushUint16(0),...pushUint16(0),
-        ...pushUint32(0),...pushUint32(f.data.length),...pushUint32(f.data.length),
-        ...pushUint16(nameBytes.length),0,0,0,0,0,0,
-        ...pushUint32(offset)
+        0x50,0x4b,0x01,0x02,20,0,20,0,0,0,0,0,
+        ...u16(0),...u16(0),
+        ...u32(0),...u32(f.data.length),...u32(f.data.length),
+        ...u16(name.length),0,0,0,0,0,0,
+        ...u32(offset)
       ]);
 
-      centralDir.push(central, nameBytes);
-      offset += header.length + nameBytes.length + f.data.length;
+      centralDir.push(central,name);
+      offset += header.length + name.length + f.data.length;
     }
 
     const centralSize = centralDir.reduce((s,b)=>s+b.length,0);
 
     const end = new Uint8Array([
       0x50,0x4b,0x05,0x06,0,0,
-      ...pushUint16(files.length),
-      ...pushUint16(files.length),
-      ...pushUint32(centralSize),
-      ...pushUint32(offset),0,0
+      ...u16(files.length),...u16(files.length),
+      ...u32(centralSize),...u32(offset),0,0
     ]);
 
-    const zip = new Blob([...zipParts, ...centralDir, end], { type: "application/zip" });
-
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(zip);
-    a.download = "QR_Tickets.zip";
-    a.click();
+    const zip = new Blob([...zipParts,...centralDir,end],{type:"application/zip"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(zip);
+    link.download = "QR_Tickets.zip";
+    link.click();
   };
 
   return (
@@ -123,11 +120,9 @@ export default function QRCodeDisplay({ attendees }: Props) {
         Download All (ZIP)
       </button>
 
-      {expanded && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-          {attendees.map(a => <QRCodeCard key={a.id} attendee={a} />)}
-        </div>
-      )}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+        {attendees.map(a => <QRCodeCard key={a.id} attendee={a} />)}
+      </div>
     </div>
   );
 }
