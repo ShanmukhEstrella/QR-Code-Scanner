@@ -7,7 +7,7 @@ type Attendee = {
   name: string;
   entry_gate: string;
   seating_position: string;
-  ticket_label: string;   // <-- REAL QR value
+  ticket_label: string;   // the ONLY source of truth
 };
 
 type Props = {
@@ -18,12 +18,16 @@ function QRCodeCard({ attendee }: { attendee: Attendee }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (canvasRef.current) {
-      QRCode.toCanvas(canvasRef.current, attendee.ticket_label, {
-        width: 200,
-        margin: 2,
-      });
-    }
+    if (!canvasRef.current) return;
+
+    // Always clear before drawing (prevents ghost QR mismatches)
+    const ctx = canvasRef.current.getContext("2d");
+    ctx?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+
+    QRCode.toCanvas(canvasRef.current, attendee.ticket_label, {
+      width: 200,
+      margin: 2
+    });
   }, [attendee.ticket_label]);
 
   const downloadQR = () => {
@@ -64,7 +68,7 @@ export default function QRCodeDisplay({ attendees }: Props) {
 
       await QRCode.toCanvas(canvas, attendee.ticket_label, {
         width: 400,
-        margin: 2,
+        margin: 2
       });
 
       const url = canvas.toDataURL("image/png");
@@ -73,7 +77,8 @@ export default function QRCodeDisplay({ attendees }: Props) {
       a.download = `${attendee.ticket_label}.png`;
       a.click();
 
-      await new Promise(resolve => setTimeout(resolve, 120));
+      // Prevent browser blocking multiple downloads
+      await new Promise(resolve => setTimeout(resolve, 150));
     }
   };
 
